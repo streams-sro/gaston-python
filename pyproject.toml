@@ -38,7 +38,7 @@ dev = [
 Homepage = "https://gaston.live"
 Documentation = "https://www.gaston.live/en/api"
 Source = "https://github.com/streams-sro/gaston-python"
-Changelog = "https://github.com/streams-sro/gaston-python/blob/main/CHANGELOG.md"
+Changelog = "https://github.com/streams-sro/gaston-python/blob/master/CHANGELOG.md"
 
 [tool.setuptools.packages.find]
 include = ["gaston*"]
