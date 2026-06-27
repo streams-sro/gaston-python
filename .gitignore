@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.idea/
+.env
+
+# Personal, not part of the published package
+local_client_test.py
+.env.example
