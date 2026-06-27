@@ -22,4 +22,4 @@ First public release on PyPI (`pip install gaston`).
 - `SearchResults` now parses the real `{"results": [...], "total": {...}}`
   response shape (previously assumed a raw Elasticsearch payload).
 
-[0.2.0]: https://github.com/streams-guru/gaston-python/releases/tag/v0.2.0
+[0.2.0]: https://github.com/streams-sro/gaston-python/releases/tag/v0.2.0

@@ -37,9 +37,8 @@ dev = [
 [project.urls]
 Homepage = "https://gaston.live"
 Documentation = "https://www.gaston.live/en/api"
-# TODO: replace with your real public repository URL
-Source = "https://github.com/streams-guru/gaston-python"
-Changelog = "https://github.com/streams-guru/gaston-python/blob/main/CHANGELOG.md"
+Source = "https://github.com/streams-sro/gaston-python"
+Changelog = "https://github.com/streams-sro/gaston-python/blob/main/CHANGELOG.md"
 
 [tool.setuptools.packages.find]
 include = ["gaston*"]
