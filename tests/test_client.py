@@ -44,12 +44,23 @@ def test_list_media_skips_none_params(client):
     responses.add(
         responses.GET,
         f"{BASE}/media/list",
-        json={"media": [{"id": "m1"}], "total": 1, "pages": 1},
+        json={
+            "media": [
+                {"id": "m1", "title": "T", "state": "transcribed",
+                 "available_languages": {"sk": 100}, "directory_id": None},
+            ],
+            "total": 1,
+            "pages": 1,
+        },
     )
     result = client.list_media(page=2)
     assert len(result) == 1
     assert result.total == 1
-    assert list(result)[0]["id"] == "m1"
+    item = list(result)[0]
+    assert item.id == "m1"
+    assert item.title == "T"
+    assert item.available_languages == {"sk": 100}
+    assert item.directory_id is None
     # dir_id was None and must not be sent
     assert "dir_id" not in responses.calls[0].request.url
     assert "page=2" in responses.calls[0].request.url
@@ -65,7 +76,7 @@ def test_get_media_parses_sentences(client):
             "title": "T",
             "state": "transcribed",
             "available_languages": {"en": 100},
-            "sentences": [{"id": 1, "text": "hi", "speaker": "A"}],
+            "sentences": [{"id": 1, "body": "hi", "speaker": "A"}],
             "diarized_sentences": {},
         },
     )

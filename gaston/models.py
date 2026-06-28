@@ -57,7 +57,7 @@ class Sentence:
 
     @property
     def text(self) -> str | None:
-        return self.raw.get("text") or self.raw.get("sentence")
+        return self.raw.get("body")
 
 
 @dataclass
@@ -81,6 +81,7 @@ class Media:
     available_languages: dict[str, Any]
     sentences: list[Sentence]
     diarized_sentences: dict[str, Any]
+    directory_id: int | None = None
     raw: dict[str, Any] = field(default_factory=dict, repr=False)
 
     @classmethod
@@ -103,15 +104,22 @@ class Media:
             available_languages=data.get("available_languages") or {},
             sentences=[Sentence.from_dict(s) for s in data.get("sentences") or []],
             diarized_sentences=data.get("diarized_sentences") or {},
+            directory_id=data.get("directory_id"),
             raw=data,
         )
 
 
 @dataclass
 class MediaList:
-    """A page of media items (``GET /media/list``)."""
+    """A page of media items (``GET /media/list``).
 
-    media: list[dict[str, Any]]
+    Each item is a :class:`Media`. Note that the listing endpoint returns a
+    lighter view than :meth:`get_media`: ``sentences`` is empty, ``language`` is
+    ``None`` (use ``available_languages`` instead) and only ``directory_id`` is
+    populated.
+    """
+
+    media: list["Media"]
     total: int
     pages: int
     raw: dict[str, Any] = field(default_factory=dict, repr=False)
@@ -119,7 +127,7 @@ class MediaList:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "MediaList":
         return cls(
-            media=data.get("media") or [],
+            media=[Media.from_dict(m) for m in data.get("media") or []],
             total=data.get("total", 0),
             pages=data.get("pages", 0),
             raw=data,

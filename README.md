@@ -47,7 +47,13 @@ client.translate(result.id, target_lang="de")
 # Speaker diarization (requires a completed translation in that language)
 client.diarize(result.id, lang="de", speakers=2)
 
-# Fetch a media item with its sentences
+# List your media (paginated). Items are Media objects.
+page = client.list_media(page=1)
+print("total:", page.total, "pages:", page.pages)
+for item in page:
+    print(item.id, item.title, item.state, item.available_languages)
+
+# Fetch a single media item with its sentences
 media = client.get_media(result.id, lang="en")
 for sentence in media.sentences:
     print(sentence.id, sentence.text, sentence.speaker)
