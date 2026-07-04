@@ -361,6 +361,7 @@ class GastonClient:
         max_: int = 50,
         dir_ids: Iterable[str | int] | None = None,
         lang: str | None = None,
+        media_id: str | None = None,
     ) -> SearchResults:
         """Search for sentences across all transcribed media.
 
@@ -381,6 +382,7 @@ class GastonClient:
             max_: Maximum number of results to return.
             dir_ids: Restrict the search to one or more directory ids.
             lang: Restrict the search to a single language.
+            media_id: Restrict the search to a single media item.
         """
         if len(query) < 3:
             raise BadRequestError("Query must be at least 3 characters.")
@@ -389,6 +391,7 @@ class GastonClient:
             "_from": from_,
             "_max": max_,
             "lang": lang,
+            "media_id": media_id,
         }
         if dir_ids is not None:
             params["dir_ids"] = [str(d) for d in dir_ids]

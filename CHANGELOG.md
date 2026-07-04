@@ -3,6 +3,12 @@
 All notable changes to this project are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.5.0] - 2026-07-04
+
+### Added
+- `search()` accepts a `media_id` parameter to restrict results to a single
+  media item.
+
 ## [0.4.0] - 2026-06-28
 
 ### Fixed
@@ -44,6 +50,7 @@ First public release on PyPI (`pip install gaston`).
 - `SearchResults` now parses the real `{"results": [...], "total": {...}}`
   response shape (previously assumed a raw Elasticsearch payload).
 
+[0.5.0]: https://github.com/streams-sro/gaston-python/releases/tag/v0.5.0
 [0.4.0]: https://github.com/streams-sro/gaston-python/releases/tag/v0.4.0
 [0.3.0]: https://github.com/streams-sro/gaston-python/releases/tag/v0.3.0
 [0.2.0]: https://github.com/streams-sro/gaston-python/releases/tag/v0.2.0
