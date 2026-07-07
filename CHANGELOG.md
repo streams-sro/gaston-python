@@ -3,6 +3,19 @@
 All notable changes to this project are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.6.0] - 2026-07-07
+
+### Added
+- `align_translation()` to queue word-level alignment of a translated sentence
+  set against source-language timestamps, for karaoke-style playback. Progress
+  is surfaced via the new `Media.translation_alignment` field (and via the
+  returned `AlignTranslationResult.alignment_progress`).
+
+### Changed
+- `move_media()` now returns a `Media` object (matching `get_media()`'s shape)
+  instead of a raw dict, since the API response was fixed to no longer leak
+  internal ids.
+
 ## [0.5.0] - 2026-07-04
 
 ### Added

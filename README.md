@@ -47,6 +47,10 @@ client.translate(result.id, target_lang="de")
 # Speaker diarization (requires a completed translation in that language)
 client.diarize(result.id, lang="de", speakers=2)
 
+# Word-level alignment of a translation against source timestamps
+# (requires a completed translation in that language)
+client.align_translation(result.id, target_lang="de", clamp=True)
+
 # List your media (paginated). Items are Media objects.
 page = client.list_media(page=1)
 print("total:", page.total, "pages:", page.pages)
@@ -111,7 +115,7 @@ client.transcribe("huge-recording.mp4", timeout=(10, None))
 ```python
 folder = client.create_directory("Podcasts")
 client.update_directory(folder.id, title="Podcast archive")
-client.move_media(media_id="me...", dir_id=folder.id)
+moved = client.move_media(media_id="me...", dir_id=folder.id)  # returns the updated Media
 tree = client.directory_tree()
 client.delete_directory(folder.id)
 ```

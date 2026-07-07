@@ -81,6 +81,7 @@ class Media:
     available_languages: dict[str, Any]
     sentences: list[Sentence]
     diarized_sentences: dict[str, Any]
+    translation_alignment: dict[str, Any]
     directory_id: int | None = None
     raw: dict[str, Any] = field(default_factory=dict, repr=False)
 
@@ -104,7 +105,8 @@ class Media:
             available_languages=data.get("available_languages") or {},
             sentences=[Sentence.from_dict(s) for s in data.get("sentences") or []],
             diarized_sentences=data.get("diarized_sentences") or {},
-            directory_id=data.get("directory_id"),
+            translation_alignment=data.get("translation_alignment") or {},
+            directory_id=data.get("directory_id", data.get("dir_id")),
             raw=data,
         )
 
@@ -166,6 +168,25 @@ class TranslateResult:
         return cls(
             id=data.get("id"),
             available_languages=data.get("available_languages") or {},
+            raw=data,
+        )
+
+
+@dataclass
+class AlignTranslationResult:
+    """Result of a word-level translation alignment request."""
+
+    id: str
+    target_lang: str | None
+    alignment_progress: int | None
+    raw: dict[str, Any] = field(default_factory=dict, repr=False)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "AlignTranslationResult":
+        return cls(
+            id=data.get("id"),
+            target_lang=data.get("target_lang"),
+            alignment_progress=data.get("alignment_progress"),
             raw=data,
         )
 

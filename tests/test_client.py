@@ -88,6 +88,29 @@ def test_get_media_parses_sentences(client):
 
 
 @responses.activate
+def test_move_media_returns_media(client):
+    responses.add(
+        responses.PATCH,
+        f"{BASE}/media",
+        json={
+            "id": "m1",
+            "title": "T",
+            "state": "transcribed",
+            "file": "https://cdn.example.com/m1.mp4",
+            "available_languages": {"en": 100},
+            "sentences": [],
+            "diarized_sentences": {},
+            "dir_id": 5,
+        },
+    )
+    media = client.move_media("m1", dir_id=5)
+    assert media.id == "m1"
+    assert media.file == "https://cdn.example.com/m1.mp4"
+    assert media.directory_id == 5
+    assert "dir_id=5" in responses.calls[0].request.url
+
+
+@responses.activate
 def test_transcribe_from_fileobj(client):
     responses.add(
         responses.POST,
@@ -120,6 +143,38 @@ def test_translate(client):
     result = client.translate("m1", target_lang="DE")
     assert result.available_languages["de"] == 0
     assert "target_lang=de" in responses.calls[0].request.url
+
+
+def test_align_translation_rejects_bad_lang(client):
+    with pytest.raises(BadRequestError):
+        client.align_translation("m1", target_lang="zz")
+
+
+@responses.activate
+def test_align_translation(client):
+    responses.add(
+        responses.PATCH,
+        f"{BASE}/media/align-translation",
+        json={"id": "m1", "target_lang": "de", "alignment_progress": 0},
+    )
+    result = client.align_translation("m1", target_lang="DE", clamp=False)
+    assert result.id == "m1"
+    assert result.target_lang == "de"
+    assert result.alignment_progress == 0
+    url = responses.calls[0].request.url
+    assert "target_lang=de" in url
+    assert "clamp=False" in url
+
+
+@responses.activate
+def test_align_translation_omits_clamp_when_unset(client):
+    responses.add(
+        responses.PATCH,
+        f"{BASE}/media/align-translation",
+        json={"id": "m1", "target_lang": "de", "alignment_progress": 0},
+    )
+    client.align_translation("m1", target_lang="de")
+    assert "clamp" not in responses.calls[0].request.url
 
 
 @responses.activate

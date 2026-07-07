@@ -17,6 +17,7 @@ from .exceptions import (
     RateLimitError,
 )
 from .models import (
+    AlignTranslationResult,
     Directory,
     Media,
     MediaList,
@@ -209,9 +210,11 @@ class GastonClient:
             self._request("GET", "/media", params={"media_id": media_id, "lang": lang})
         )
 
-    def move_media(self, media_id: str, dir_id: int | None = None) -> dict[str, Any]:
+    def move_media(self, media_id: str, dir_id: int | None = None) -> Media:
         """Move a media item into a directory (``dir_id=None`` for root)."""
-        return self._request("PATCH", "/media", params={"media_id": media_id, "dir_id": dir_id})
+        return Media.from_dict(
+            self._request("PATCH", "/media", params={"media_id": media_id, "dir_id": dir_id})
+        )
 
     def transcribe(
         self,
@@ -298,6 +301,38 @@ class GastonClient:
             "PATCH", "/media/translate", params={"media_id": media_id, "target_lang": target_lang}
         )
         return TranslateResult.from_dict(data)
+
+    def align_translation(
+        self,
+        media_id: str,
+        target_lang: str,
+        clamp: bool | None = None,
+    ) -> AlignTranslationResult:
+        """Queue word-level alignment of a translation against source timestamps.
+
+        Produces per-word start/end times for ``target_lang`` (for karaoke-style
+        playback), based on the source-language WhisperX timestamps.
+
+        Args:
+            media_id: The public media id.
+            target_lang: Target language short code; must already be fully
+                translated (``available_languages[target_lang] == 100``) or the
+                API returns a 400.
+            clamp: Force non-decreasing timestamps across a sentence. If
+                omitted, the worker uses its own default.
+        """
+        target_lang = target_lang.lower().strip()
+        if target_lang not in TRANSLATION_LANGUAGES:
+            raise BadRequestError(
+                f"Language '{target_lang}' is not a supported translation target.",
+                details=list(TRANSLATION_LANGUAGES),
+            )
+        data = self._request(
+            "PATCH",
+            "/media/align-translation",
+            params={"media_id": media_id, "target_lang": target_lang, "clamp": clamp},
+        )
+        return AlignTranslationResult.from_dict(data)
 
     def diarize(
         self,

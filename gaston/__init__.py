@@ -21,6 +21,7 @@ from .exceptions import (
     RateLimitError,
 )
 from .models import (
+    AlignTranslationResult,
     Directory,
     Media,
     MediaList,
@@ -32,7 +33,7 @@ from .models import (
     User,
 )
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 
 __all__ = [
     "GastonClient",
@@ -52,6 +53,7 @@ __all__ = [
     "Directory",
     "TranscribeResult",
     "TranslateResult",
+    "AlignTranslationResult",
     "SearchResults",
     # constants
     "SUPPORTED_LANGUAGES",
