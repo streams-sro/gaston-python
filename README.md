@@ -62,6 +62,9 @@ media = client.get_media(result.id, lang="en")
 for sentence in media.sentences:
     print(sentence.id, sentence.text, sentence.speaker)
 
+# Export a transcript (text, text_timestamps, csv, srt or audio)
+client.export_media_to_file(result.id, "subtitles.srt", format="srt", lang="de")
+
 # Full text search across the whole library
 results = client.search("climate change", max_=20)
 print("total matches:", results.total)
@@ -109,6 +112,35 @@ client = GastonClient(
 # Or override per call (e.g. no read timeout for a very large file)
 client.transcribe("huge-recording.mp4", timeout=(10, None))
 ```
+
+## Exporting
+
+`export_media()` returns the file in memory as a `MediaExport` (`content`,
+`filename`, `content_type`, plus `.text` and `.save(path)`), while
+`export_media_to_file()` streams it straight to disk — prefer it for audio.
+
+```python
+# Transcript as plain text (format: text, text_timestamps, csv, srt, audio)
+export = client.export_media("me...", format="text", lang="en")
+print(export.filename)  # filename suggested by the server, e.g. "My interview.txt"
+print(export.text)
+
+# Subtitles split into blocks of at most 8 words, prefixed with speaker names
+# (speaker names require diarization)
+client.export_media_to_file(
+    "me...", "interview.srt", format="srt", max_words_per_block=8, include_speakers=True
+)
+
+# Audio (a finished dubbed track for `lang` if one exists, otherwise the
+# original). Passing an existing directory saves it under the server-suggested
+# filename.
+path = client.export_media_to_file("me...", ".", format="audio", lang="de")
+```
+
+`lang` defaults to the media's original language. Exporting audio, or any
+media longer than 30 minutes, requires a paid plan; otherwise an
+`AuthenticationError` (HTTP 403) is raised. Audio exports use the client's
+`upload_timeout` by default.
 
 ## Directories
 

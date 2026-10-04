@@ -3,6 +3,17 @@
 All notable changes to this project are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.7.0] - 2026-10-04
+
+### Added
+- `export_media()` to export a media item as `text`, `text_timestamps`, `csv`,
+  `srt` or `audio`, returning a `MediaExport` (content, server-suggested
+  filename and content type). `srt` exports support `max_words_per_block` and
+  `include_speakers`.
+- `export_media_to_file()` to stream an export straight to disk (recommended
+  for audio).
+- `EXPORT_FORMATS` constant listing the supported export formats.
+
 ## [0.6.0] - 2026-07-07
 
 ### Added

@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import os
+import re
+from pathlib import Path
 from typing import IO, Any, BinaryIO, Iterable, Mapping, Tuple, Union
+from urllib.parse import unquote
 
 import requests
 
-from .constants import SUPPORTED_LANGUAGES, TRANSLATION_LANGUAGES
+from .constants import EXPORT_FORMATS, SUPPORTED_LANGUAGES, TRANSLATION_LANGUAGES
 from .exceptions import (
     AuthenticationError,
     BadRequestError,
@@ -20,6 +23,7 @@ from .models import (
     AlignTranslationResult,
     Directory,
     Media,
+    MediaExport,
     MediaList,
     SearchResults,
     TranscribeResult,
@@ -40,6 +44,9 @@ DEFAULT_TIMEOUT: TimeoutType = 30.0
 # Endpoints that upload a file or fetch a remote URL can legitimately take
 # minutes, so they get a much more generous read timeout by default.
 DEFAULT_UPLOAD_TIMEOUT: TimeoutType = (10.0, 600.0)
+
+# Chunk size used when streaming an export to disk.
+_DOWNLOAD_CHUNK_SIZE = 1024 * 1024
 
 
 class _Unset:
@@ -65,9 +72,9 @@ class GastonClient:
         timeout: Timeout for ordinary requests. A single float covers both
             connect and read; a ``(connect, read)`` tuple sets them separately;
             ``None`` waits indefinitely. Defaults to 30s.
-        upload_timeout: Timeout for the file-upload endpoint (``transcribe``),
-            which can take minutes for large files. Defaults to
-            ``(10s connect, 600s read)``.
+        upload_timeout: Timeout for transferring media files (``transcribe``
+            and audio exports), which can take minutes for large files.
+            Defaults to ``(10s connect, 600s read)``.
         session: An optional pre-configured :class:`requests.Session`.
 
     Example::
@@ -127,6 +134,19 @@ class GastonClient:
         files: Mapping[str, Any] | None = None,
         timeout: TimeoutType | _Unset = _UNSET,
     ) -> Any:
+        resp = self._send(method, path, params=params, files=files, timeout=timeout)
+        return self._handle_response(resp)
+
+    def _send(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: Mapping[str, Any] | None = None,
+        files: Mapping[str, Any] | None = None,
+        timeout: TimeoutType | _Unset = _UNSET,
+        stream: bool = False,
+    ) -> requests.Response:
         url = f"{self.base_url}{path}"
         # Drop params that are None so we don't send "dir_id=None" literally.
         clean_params = None
@@ -140,11 +160,12 @@ class GastonClient:
                 params=clean_params,
                 files=files,
                 timeout=self.timeout if isinstance(timeout, _Unset) else timeout,
+                stream=stream,
             )
         except requests.RequestException as exc:
             raise GastonError(f"Request to {url} failed: {exc}") from exc
 
-        return self._handle_response(resp)
+        return resp
 
     @staticmethod
     def _handle_response(resp: requests.Response) -> Any:
@@ -355,6 +376,141 @@ class GastonClient:
         )
         return TranscribeResult.from_dict(data)
 
+    def export_media(
+        self,
+        media_id: str,
+        format: str,
+        lang: str | None = None,
+        max_words_per_block: int = 0,
+        include_speakers: bool = False,
+        timeout: TimeoutType | _Unset = _UNSET,
+    ) -> MediaExport:
+        """Export a media item's transcript (or audio) as a file, in memory.
+
+        For large audio files prefer :meth:`export_media_to_file`, which
+        streams to disk instead of holding the whole file in memory.
+
+        Args:
+            media_id: The public media id.
+            format: One of :data:`EXPORT_FORMATS`: ``text``,
+                ``text_timestamps``, ``csv``, ``srt`` or ``audio``. Exporting
+                audio, or any media longer than 30 minutes, requires a paid
+                plan.
+            lang: Language of the transcript to export (defaults to the
+                original). For ``audio``, a finished dubbed track in this
+                language is returned if one exists.
+            max_words_per_block: ``srt`` only: split sentences into subtitle
+                blocks of at most this many words (``0`` keeps whole
+                sentences).
+            include_speakers: ``srt`` only: prefix subtitles with speaker names
+                (requires diarization).
+            timeout: Override the timeout for this call. Defaults to the
+                client's ``upload_timeout`` for ``audio`` and ``timeout``
+                otherwise.
+
+        Returns:
+            A :class:`MediaExport` with the file content and the filename
+            suggested by the server.
+        """
+        resp = self._send_export(
+            media_id, format, lang, max_words_per_block, include_speakers, timeout
+        )
+        with resp:
+            try:
+                content = resp.content
+            except requests.RequestException as exc:
+                raise GastonError(f"Downloading export of '{media_id}' failed: {exc}") from exc
+            return MediaExport(
+                content=content,
+                filename=_filename_from_disposition(resp.headers.get("Content-Disposition")),
+                content_type=resp.headers.get("Content-Type"),
+            )
+
+    def export_media_to_file(
+        self,
+        media_id: str,
+        path: str | os.PathLike[str],
+        format: str,
+        lang: str | None = None,
+        max_words_per_block: int = 0,
+        include_speakers: bool = False,
+        timeout: TimeoutType | _Unset = _UNSET,
+    ) -> Path:
+        """Export a media item and stream it straight to ``path``.
+
+        Takes the same arguments as :meth:`export_media`. If ``path`` is an
+        existing directory, the file is written inside it using the filename
+        suggested by the server.
+
+        Returns:
+            The path the file was written to.
+        """
+        resp = self._send_export(
+            media_id, format, lang, max_words_per_block, include_speakers, timeout
+        )
+        with resp:
+            target = Path(path)
+            if target.is_dir():
+                filename = _filename_from_disposition(resp.headers.get("Content-Disposition"))
+                if not filename:
+                    raise GastonError("The server did not suggest a filename; pass a file path.")
+                target = target / filename
+            try:
+                with open(target, "wb") as fh:
+                    for chunk in resp.iter_content(_DOWNLOAD_CHUNK_SIZE):
+                        fh.write(chunk)
+            except requests.RequestException as exc:
+                target.unlink(missing_ok=True)
+                raise GastonError(f"Downloading export of '{media_id}' failed: {exc}") from exc
+            except BaseException:
+                target.unlink(missing_ok=True)
+                raise
+        return target
+
+    def _send_export(
+        self,
+        media_id: str,
+        format: str,
+        lang: str | None,
+        max_words_per_block: int,
+        include_speakers: bool,
+        timeout: TimeoutType | _Unset,
+    ) -> requests.Response:
+        if format not in EXPORT_FORMATS:
+            raise BadRequestError(
+                f"Export format '{format}' is not supported.", details=list(EXPORT_FORMATS)
+            )
+        if max_words_per_block < 0:
+            raise BadRequestError("max_words_per_block cannot be negative.")
+        if isinstance(timeout, _Unset) and format == "audio":
+            timeout = self.upload_timeout
+
+        resp = self._send(
+            "GET",
+            "/media/export",
+            params={
+                "media_id": media_id,
+                "format": format,
+                "lang": lang,
+                # Leave server defaults implicit.
+                "max_words_per_block": max_words_per_block or None,
+                "include_speakers": include_speakers or None,
+            },
+            timeout=timeout,
+            stream=True,
+        )
+        # Successful exports are never JSON (a transcript might still happen to
+        # parse as JSON, so don't sniff the body); errors always are.
+        content_type = resp.headers.get("Content-Type", "")
+        if not resp.ok or content_type.startswith("application/json"):
+            with resp:
+                self._handle_response(resp)
+                raise GastonAPIError(
+                    "Unexpected JSON response to an export request.",
+                    status_code=resp.status_code,
+                )
+        return resp
+
     # -- directories -----------------------------------------------------
 
     def directory_tree(self) -> dict[str, Any]:
@@ -431,3 +587,23 @@ class GastonClient:
         if dir_ids is not None:
             params["dir_ids"] = [str(d) for d in dir_ids]
         return SearchResults.from_dict(self._request("GET", "/sentence/search", params=params))
+
+
+def _filename_from_disposition(header: str | None) -> str | None:
+    """Extract the filename from a ``Content-Disposition`` header.
+
+    Prefers the RFC 5987 ``filename*`` (UTF-8) form over the ASCII fallback.
+    """
+    if not header:
+        return None
+    match = re.search(r"filename\*\s*=\s*([^']*)'[^']*'([^;]+)", header, re.IGNORECASE)
+    if match:
+        name = unquote(match.group(2).strip(), encoding=match.group(1) or "utf-8")
+    else:
+        match = re.search(r'filename\s*=\s*"([^"]*)"|filename\s*=\s*([^;]+)', header, re.IGNORECASE)
+        if not match:
+            return None
+        name = (match.group(1) if match.group(1) is not None else match.group(2)).strip()
+    # Never let a server-supplied name escape the target directory.
+    name = os.path.basename(name.replace("\\", "/"))
+    return name if name not in ("", ".", "..") else None

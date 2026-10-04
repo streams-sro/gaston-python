@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from .client import GastonClient
 from .constants import (
+    EXPORT_FORMATS,
     SUPPORTED_LANGUAGES,
     TRANSLATION_LANGUAGES,
     TRANSLATION_OPTIONS,
@@ -24,6 +25,7 @@ from .models import (
     AlignTranslationResult,
     Directory,
     Media,
+    MediaExport,
     MediaList,
     SearchResults,
     Sentence,
@@ -33,7 +35,7 @@ from .models import (
     User,
 )
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"
 
 __all__ = [
     "GastonClient",
@@ -49,6 +51,7 @@ __all__ = [
     "Usage",
     "Media",
     "MediaList",
+    "MediaExport",
     "Sentence",
     "Directory",
     "TranscribeResult",
@@ -56,6 +59,7 @@ __all__ = [
     "AlignTranslationResult",
     "SearchResults",
     # constants
+    "EXPORT_FORMATS",
     "SUPPORTED_LANGUAGES",
     "TRANSLATION_LANGUAGES",
     "TRANSLATION_OPTIONS",

@@ -9,6 +9,7 @@ from gaston import (
     AuthenticationError,
     BadRequestError,
     GastonClient,
+    NotFoundError,
     RateLimitError,
 )
 
@@ -175,6 +176,123 @@ def test_align_translation_omits_clamp_when_unset(client):
     )
     client.align_translation("m1", target_lang="de")
     assert "clamp" not in responses.calls[0].request.url
+
+
+@responses.activate
+def test_export_media_text(client):
+    responses.add(
+        responses.GET,
+        f"{BASE}/media/export",
+        body="Hello world.\n".encode("utf-8"),
+        content_type="text/plain; charset=utf-8",
+        headers={
+            "Content-Disposition": "attachment; filename=\"zaznam\"; "
+                                   "filename*=UTF-8''Z%C3%A1znam.txt",
+        },
+    )
+    export = client.export_media("m1", "text", lang="sk")
+    assert export.text == "Hello world.\n"
+    assert export.filename == "Záznam.txt"
+    assert export.content_type.startswith("text/plain")
+    url = responses.calls[0].request.url
+    assert "media_id=m1" in url and "format=text" in url and "lang=sk" in url
+    # srt-only defaults must not be sent
+    assert "max_words_per_block" not in url
+    assert "include_speakers" not in url
+
+
+@responses.activate
+def test_export_media_json_like_transcript_is_not_parsed(client):
+    # A transcript that happens to be valid JSON must still come back as text.
+    responses.add(
+        responses.GET, f"{BASE}/media/export", body=b"123",
+        content_type="text/plain; charset=utf-8",
+    )
+    assert client.export_media("m1", "text").content == b"123"
+
+
+@responses.activate
+def test_export_media_srt_options(client):
+    responses.add(
+        responses.GET, f"{BASE}/media/export", body=b"1\n",
+        content_type="application/x-subrip; charset=utf-8",
+    )
+    client.export_media("m1", "srt", max_words_per_block=8, include_speakers=True)
+    url = responses.calls[0].request.url
+    assert "max_words_per_block=8" in url
+    assert "include_speakers=True" in url
+
+
+@responses.activate
+def test_export_media_error(client):
+    responses.add(
+        responses.GET,
+        f"{BASE}/media/export",
+        json={"error": "Media 'm1' not found."},
+        status=404,
+    )
+    with pytest.raises(NotFoundError):
+        client.export_media("m1", "csv")
+
+
+@responses.activate
+def test_export_media_paid_plan_error(client):
+    responses.add(
+        responses.GET,
+        f"{BASE}/media/export",
+        json={"error": "Exporting audio requires a paid plan."},
+        status=403,
+    )
+    with pytest.raises(AuthenticationError) as exc:
+        client.export_media("m1", "audio")
+    assert "paid plan" in str(exc.value)
+
+
+def test_export_media_rejects_bad_format(client):
+    with pytest.raises(BadRequestError):
+        client.export_media("m1", "pdf")
+
+
+def test_export_media_rejects_negative_block_size(client):
+    with pytest.raises(BadRequestError):
+        client.export_media("m1", "srt", max_words_per_block=-1)
+
+
+@responses.activate
+def test_export_media_to_file_uses_server_filename(client, tmp_path):
+    responses.add(
+        responses.GET,
+        f"{BASE}/media/export",
+        body=b"\x00audio-bytes",
+        content_type="audio/mpeg",
+        headers={"Content-Disposition": 'attachment; filename="../../evil.mp3"'},
+    )
+    path = client.export_media_to_file("m1", tmp_path, "audio")
+    assert path == tmp_path / "evil.mp3"
+    assert path.read_bytes() == b"\x00audio-bytes"
+
+
+@responses.activate
+def test_export_media_to_file_explicit_path(client, tmp_path):
+    responses.add(
+        responses.GET, f"{BASE}/media/export", body=b"a,b\n",
+        content_type="text/csv; charset=utf-8",
+    )
+    target = tmp_path / "out.csv"
+    assert client.export_media_to_file("m1", target, "csv") == target
+    assert target.read_bytes() == b"a,b\n"
+
+
+@responses.activate
+def test_export_media_to_file_error_writes_nothing(client, tmp_path):
+    responses.add(
+        responses.GET, f"{BASE}/media/export",
+        json={"error": "No transcription found."}, status=404,
+    )
+    target = tmp_path / "out.txt"
+    with pytest.raises(NotFoundError):
+        client.export_media_to_file("m1", target, "text")
+    assert not target.exists()
 
 
 @responses.activate

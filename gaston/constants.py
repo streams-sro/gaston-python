@@ -32,6 +32,12 @@ TRANSLATION_OPTIONS: dict[str, str] = {
 #: Languages available as translation targets.
 TRANSLATION_LANGUAGES: tuple[str, ...] = tuple(TRANSLATION_OPTIONS.keys())
 
+#: Formats accepted by :meth:`GastonClient.export_media`. ``text_timestamps``
+#: is plain text with a timestamp before each sentence; ``audio`` returns the
+#: media file itself (or a finished dubbed track for ``lang``) and requires a
+#: paid plan.
+EXPORT_FORMATS: tuple[str, ...] = ("text", "text_timestamps", "csv", "srt", "audio")
+
 #: Possible values of ``Media.state``.
 MEDIA_STATE_PENDING = "pending"
 MEDIA_STATE_UPLOADED = "uploaded"

@@ -6,7 +6,9 @@ explicitly mapped here are still accessible.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 
@@ -189,6 +191,41 @@ class AlignTranslationResult:
             alignment_progress=data.get("alignment_progress"),
             raw=data,
         )
+
+
+@dataclass
+class MediaExport:
+    """An exported media file (``GET /media/export``).
+
+    Unlike the other models this wraps a file rather than a JSON payload, so
+    there is no ``raw`` dict.
+    """
+
+    content: bytes
+    filename: str | None
+    content_type: str | None
+
+    @property
+    def text(self) -> str:
+        """The content decoded as UTF-8 (for the text, CSV and SRT formats)."""
+        return self.content.decode("utf-8")
+
+    def save(self, path: str | os.PathLike[str]) -> Path:
+        """Write the export to ``path``.
+
+        If ``path`` is an existing directory, the file is written inside it
+        using :attr:`filename` as suggested by the server.
+
+        Returns:
+            The path the file was written to.
+        """
+        target = Path(path)
+        if target.is_dir():
+            if not self.filename:
+                raise ValueError("The server did not suggest a filename; pass a file path.")
+            target = target / self.filename
+        target.write_bytes(self.content)
+        return target
 
 
 @dataclass
