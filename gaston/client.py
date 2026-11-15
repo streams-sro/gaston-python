@@ -4,13 +4,20 @@ from __future__ import annotations
 
 import os
 import re
+import time
 from pathlib import Path
 from typing import IO, Any, BinaryIO, Iterable, Mapping, Tuple, Union
 from urllib.parse import unquote
 
 import requests
 
-from .constants import EXPORT_FORMATS, SUPPORTED_LANGUAGES, TRANSLATION_LANGUAGES
+from .constants import (
+    DIGEST_DETAIL_BRIEF,
+    DIGEST_DETAILS,
+    EXPORT_FORMATS,
+    SUPPORTED_LANGUAGES,
+    TRANSLATION_LANGUAGES,
+)
 from .exceptions import (
     AuthenticationError,
     BadRequestError,
@@ -21,6 +28,7 @@ from .exceptions import (
 )
 from .models import (
     AlignTranslationResult,
+    Digest,
     Directory,
     Media,
     MediaExport,
@@ -133,9 +141,10 @@ class GastonClient:
         params: Mapping[str, Any] | None = None,
         files: Mapping[str, Any] | None = None,
         timeout: TimeoutType | _Unset = _UNSET,
+        digest: bool = False,
     ) -> Any:
         resp = self._send(method, path, params=params, files=files, timeout=timeout)
-        return self._handle_response(resp)
+        return self._handle_response(resp, digest=digest)
 
     def _send(
         self,
@@ -168,7 +177,7 @@ class GastonClient:
         return resp
 
     @staticmethod
-    def _handle_response(resp: requests.Response) -> Any:
+    def _handle_response(resp: requests.Response, digest: bool = False) -> Any:
         try:
             body = resp.json()
         except ValueError:
@@ -182,6 +191,10 @@ class GastonClient:
         # The API signals failures both via HTTP status codes and via an
         # ``error`` key in an otherwise 200 response. Handle both.
         error_message = body.get("error") if isinstance(body, dict) else None
+        # A failed digest is a 2xx response carrying both ``digest_id`` and
+        # ``error``; that is the digest's own state, not a failed request.
+        if digest and resp.ok and isinstance(body, dict) and body.get("digest_id"):
+            error_message = None
 
         if not resp.ok or error_message is not None:
             exc_cls = _STATUS_EXCEPTIONS.get(resp.status_code, GastonAPIError)
@@ -510,6 +523,116 @@ class GastonClient:
                     status_code=resp.status_code,
                 )
         return resp
+
+    # -- digest ----------------------------------------------------------
+
+    def create_digest(
+        self,
+        url: str,
+        lang: str | None = None,
+        dir_id: int | None = None,
+        detail: str = DIGEST_DETAIL_BRIEF,
+        question: str | None = None,
+        answer_lang: str | None = None,
+    ) -> Digest:
+        """Add the media behind ``url`` and request an AI digest of it.
+
+        The media is added like :meth:`transcribe_url`; the digest is a summary
+        and, optionally, the answer to a question. It is generated once the
+        media is transcribed: poll :meth:`get_digest` or use
+        :meth:`wait_for_digest`. Requesting the same digest of the same media
+        again returns the existing one.
+
+        Args:
+            url: The media URL (YouTube or web).
+            lang: Source language hint (see :data:`SUPPORTED_LANGUAGES`).
+            dir_id: Directory to place the media into.
+            detail: One of :data:`DIGEST_DETAILS`: ``brief`` or ``detailed``.
+            question: A question to answer from the transcript (at most 2000
+                characters).
+            answer_lang: Language of the summary and answer. Validated by the
+                server, whose list differs from :data:`SUPPORTED_LANGUAGES`.
+
+        Returns:
+            A :class:`Digest` with only the ids and states set; the rest comes
+            from :meth:`get_digest`.
+        """
+        if lang is not None and lang not in SUPPORTED_LANGUAGES:
+            raise BadRequestError(
+                f"Language '{lang}' is not supported.", details=list(SUPPORTED_LANGUAGES)
+            )
+        if detail not in DIGEST_DETAILS:
+            raise BadRequestError(
+                f"Digest detail '{detail}' is not supported.", details=list(DIGEST_DETAILS)
+            )
+        data = self._request(
+            "POST",
+            "/digest",
+            params={
+                "url": url,
+                "lang": lang,
+                "dir_id": dir_id,
+                # Leave the server default implicit.
+                "detail": None if detail == DIGEST_DETAIL_BRIEF else detail,
+                "question": question,
+                "answer_lang": answer_lang,
+            },
+        )
+        return Digest.from_dict(data)
+
+    def get_digest(self, digest_id: str) -> Digest:
+        """Fetch a digest and its current state.
+
+        A digest that failed is returned (with :attr:`Digest.is_failed` true
+        and :attr:`Digest.error` set) rather than raised, so polling code can
+        tell a failed digest from a failed request.
+
+        Args:
+            digest_id: The digest id returned by :meth:`create_digest`.
+        """
+        return Digest.from_dict(
+            self._request("GET", "/digest", params={"digest_id": digest_id}, digest=True)
+        )
+
+    def wait_for_digest(
+        self,
+        digest_id: str,
+        timeout: float | None = 900.0,
+        interval: float = 10.0,
+    ) -> Digest:
+        """Poll a digest until it is ready or has failed.
+
+        Transcribing a long recording takes minutes, hence the generous
+        default timeout.
+
+        Args:
+            digest_id: The digest id returned by :meth:`create_digest`.
+            timeout: Give up after this many seconds (``None`` waits
+                indefinitely).
+            interval: Seconds to wait between polls.
+
+        Returns:
+            A finished :class:`Digest`; check :attr:`Digest.is_failed`.
+
+        Raises:
+            GastonError: If the digest is not finished within ``timeout``.
+        """
+        deadline = None if timeout is None else time.monotonic() + timeout
+        while True:
+            digest = self.get_digest(digest_id)
+            if digest.is_finished:
+                return digest
+            wait = max(0.0, interval)
+            if deadline is not None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise GastonError(
+                        f"Digest '{digest_id}' was not finished within {timeout} seconds "
+                        f"(last state: {digest.digest_state or 'unknown'})."
+                    )
+                wait = min(wait, remaining)
+            if wait > 0:
+                time.sleep(wait)
 
     # -- directories -----------------------------------------------------
 

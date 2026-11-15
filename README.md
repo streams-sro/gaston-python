@@ -4,8 +4,8 @@
 [![Python versions](https://img.shields.io/pypi/pyversions/gaston.svg)](https://pypi.org/project/gaston/)
 [![License: MIT](https://img.shields.io/pypi/l/gaston.svg)](https://pypi.org/project/gaston/)
 
-A small, typed Python client for the **Gaston API**: transcription, translation
-and full-text search of sentences within transcribed recordings.
+A small, typed Python client for the **Gaston API**: transcription, translation,
+AI digests and full-text search of sentences within transcribed recordings.
 
 > Requires a Gaston account and an API token (see [Configuration](#configuration)).
 
@@ -64,6 +64,9 @@ for sentence in media.sentences:
 
 # Export a transcript (text, text_timestamps, csv, srt or audio)
 client.export_media_to_file(result.id, "subtitles.srt", format="srt", lang="de")
+
+# AI digest (summary) of a URL; see "Digest" below
+digest = client.wait_for_digest(client.create_digest("https://youtu.be/dQw4w9WgXcQ").digest_id)
 
 # Full text search across the whole library
 results = client.search("climate change", max_=20)
@@ -141,6 +144,64 @@ path = client.export_media_to_file("me...", ".", format="audio", lang="de")
 media longer than 30 minutes, requires a paid plan; otherwise an
 `AuthenticationError` (HTTP 403) is raised. Audio exports use the client's
 `upload_timeout` by default.
+
+## Digest
+
+A digest is an AI-generated summary of a recording, optionally with the answer
+to a question about it. `create_digest()` adds the media behind a URL (like
+`transcribe_url()`) and requests the digest; it is generated once the media is
+transcribed, so poll `get_digest()` or let `wait_for_digest()` do it.
+
+```python
+digest = client.create_digest(
+    "https://youtu.be/dQw4w9WgXcQ",
+    detail="detailed",                       # "brief" (default) or "detailed"
+    question="What does the singer promise?",
+    answer_lang="de",                        # language of the summary and answer
+)
+print(digest.digest_id, digest.digest_state)  # e.g. "dg... pending"
+
+# Polls every 10s for up to 15 minutes; raises GastonError on timeout
+digest = client.wait_for_digest(digest.digest_id)
+
+if digest.is_failed:
+    print("Digest failed:", digest.error)
+else:
+    print(digest.summary.text)
+    for citation in digest.summary.citations:
+        # marker as used in the text, e.g. "[S12-S15]", with its position in seconds
+        print(citation.marker, citation.start, citation.end)
+    if digest.answer is not None:
+        print(digest.answer.text or f"No answer: {digest.answer.error}")
+```
+
+The full signatures are:
+
+```python
+client.create_digest(url, lang=None, dir_id=None, detail="brief", question=None, answer_lang=None)
+client.get_digest(digest_id)
+client.wait_for_digest(digest_id, timeout=900.0, interval=10.0)
+```
+
+`Digest.digest_state` is one of `pending`, `generating`, `ready` or `error`,
+with the properties `is_ready`, `is_failed` and `is_finished`. `Digest.id` and
+`Digest.state` describe the underlying media, and `transcription_progress` is
+reported while it is still being transcribed. Things to know:
+
+- `create_digest()` returns only the ids and states; `summary`, `answer`,
+  `language` and the rest are filled in by `get_digest()`.
+- A failed digest is **returned**, not raised: `is_failed` is true and `error`
+  says why. Exceptions are reserved for failed requests (an unknown digest id
+  raises `NotFoundError`; an account with AI features disabled raises
+  `AuthenticationError`).
+- If the summary succeeded but the question could not be answered, the digest
+  is still `ready`: `answer.text` is `None` and `answer.error` is set.
+- Requesting the same digest of the same media again returns the existing one.
+- `answer_lang` is validated by the server, whose list differs from
+  `SUPPORTED_LANGUAGES`; an unsupported code raises a `BadRequestError` with
+  the accepted codes in `.details`. Questions are limited to 2000 characters.
+- Transcribing a long recording takes minutes, so keep the `wait_for_digest()`
+  timeout generous (pass `timeout=None` to wait indefinitely).
 
 ## Directories
 

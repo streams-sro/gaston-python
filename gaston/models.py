@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .constants import DIGEST_STATE_ERROR, DIGEST_STATE_READY
+
 
 @dataclass
 class Usage:
@@ -226,6 +228,122 @@ class MediaExport:
             target = target / self.filename
         target.write_bytes(self.content)
         return target
+
+
+@dataclass
+class DigestCitation:
+    """A citation inside a digest text, pointing at the transcript sentences
+    that support a statement."""
+
+    #: The marker as it appears in the text, e.g. ``[S12-S15]``.
+    marker: str | None
+    title: str | None
+    sentence_ids: list[int]
+    #: Start of the first cited sentence, in seconds.
+    start: float | None
+    #: End of the last cited sentence, in seconds.
+    end: float | None
+    raw: dict[str, Any] = field(default_factory=dict, repr=False)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "DigestCitation":
+        return cls(
+            marker=data.get("marker"),
+            title=data.get("title"),
+            sentence_ids=data.get("sentence_ids") or [],
+            start=data.get("start"),
+            end=data.get("end"),
+            raw=data,
+        )
+
+
+@dataclass
+class DigestText:
+    """An AI-generated text of a digest (its summary, or the answer to its
+    question) with the citations it refers to."""
+
+    #: The text; ``None`` when generating it failed (see :attr:`error`).
+    text: str | None
+    citations: list[DigestCitation]
+    error: str | None
+    raw: dict[str, Any] = field(default_factory=dict, repr=False)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "DigestText":
+        return cls(
+            text=data.get("text"),
+            citations=[DigestCitation.from_dict(c) for c in data.get("citations") or []],
+            error=data.get("error"),
+            raw=data,
+        )
+
+
+@dataclass
+class Digest:
+    """An AI digest of a media item (``POST /digest``, ``GET /digest``).
+
+    ``POST /digest`` only returns the ids and states; the remaining fields are
+    filled in by ``GET /digest``.
+    """
+
+    #: The public id of the media being digested.
+    id: str | None
+    #: State of the media (see the ``MEDIA_STATE_*`` constants).
+    state: str | None
+    digest_id: str | None
+    #: State of the digest (see the ``DIGEST_STATE_*`` constants).
+    digest_state: str | None
+    #: ``brief`` or ``detailed``.
+    detail: str | None = None
+    #: The question asked about the media, if any.
+    question: str | None = None
+    #: Language of the summary and answer; set once the digest is ready.
+    language: str | None = None
+    #: Reported while the media is still being transcribed.
+    transcription_progress: int | None = None
+    #: Set once the digest is ready.
+    summary: DigestText | None = None
+    #: Set once the digest is ready, if a question was asked. If only the
+    #: question failed, its ``text`` is ``None`` and its ``error`` is set.
+    answer: DigestText | None = None
+    #: Why the digest failed, when its state is ``error``.
+    error: str | None = None
+    raw: dict[str, Any] = field(default_factory=dict, repr=False)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Digest":
+        summary = data.get("summary")
+        answer = data.get("answer")
+        return cls(
+            id=data.get("id"),
+            state=data.get("state"),
+            digest_id=data.get("digest_id"),
+            digest_state=data.get("digest_state"),
+            detail=data.get("detail"),
+            question=data.get("question"),
+            language=data.get("language"),
+            transcription_progress=data.get("transcription_progress"),
+            summary=DigestText.from_dict(summary) if isinstance(summary, dict) else None,
+            answer=DigestText.from_dict(answer) if isinstance(answer, dict) else None,
+            error=data.get("error"),
+            raw=data,
+        )
+
+    @property
+    def is_ready(self) -> bool:
+        """Whether the summary is available. The answer may still have failed;
+        check ``answer.error``."""
+        return self.digest_state == DIGEST_STATE_READY
+
+    @property
+    def is_failed(self) -> bool:
+        """Whether the digest failed (see :attr:`error`)."""
+        return self.digest_state == DIGEST_STATE_ERROR
+
+    @property
+    def is_finished(self) -> bool:
+        """Whether the digest reached a final state and polling can stop."""
+        return self.is_ready or self.is_failed
 
 
 @dataclass

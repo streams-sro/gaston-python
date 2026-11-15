@@ -3,6 +3,20 @@
 All notable changes to this project are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.8.0] - 2026-11-15
+
+### Added
+- `create_digest()` to add the media behind a URL and request an AI digest of
+  it (a `brief` or `detailed` summary, optionally with the answer to a
+  question), `get_digest()` to fetch it, and `wait_for_digest()` to poll until
+  it is ready or has failed (default timeout 900s, polling every 10s).
+- `Digest`, `DigestText` and `DigestCitation` models. A failed digest is
+  returned with `Digest.is_failed` true rather than raised, even though the
+  API reports it with an `error` key.
+- `DIGEST_DETAILS` constant, plus `DIGEST_STATE_*` and `DIGEST_DETAIL_*` in
+  `gaston.constants`. The digest answer language is validated by the server,
+  not against `SUPPORTED_LANGUAGES`.
+
 ## [0.7.0] - 2026-10-04
 
 ### Added

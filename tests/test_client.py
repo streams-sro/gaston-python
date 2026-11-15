@@ -8,7 +8,9 @@ import responses
 from gaston import (
     AuthenticationError,
     BadRequestError,
+    GastonAPIError,
     GastonClient,
+    GastonError,
     NotFoundError,
     RateLimitError,
 )
@@ -364,6 +366,234 @@ def test_delete_directory_returns_bool(client):
     with responses.RequestsMock() as rsps:
         rsps.add(responses.DELETE, f"{BASE}/directory", json={"result": True})
         assert client.delete_directory(5) is True
+
+
+@responses.activate
+def test_create_digest(client):
+    responses.add(
+        responses.POST,
+        f"{BASE}/digest",
+        json={"id": "me1", "state": "pending", "digest_id": "dg1", "digest_state": "pending"},
+    )
+    digest = client.create_digest(
+        "https://youtu.be/x", lang="en", dir_id=5, detail="detailed",
+        question="Who is speaking?", answer_lang="ga",
+    )
+    assert (digest.id, digest.state) == ("me1", "pending")
+    assert (digest.digest_id, digest.digest_state) == ("dg1", "pending")
+    assert digest.detail is None and digest.question is None and digest.language is None
+    assert digest.transcription_progress is None
+    assert digest.summary is None and digest.answer is None and digest.error is None
+    assert not digest.is_finished
+
+    request = responses.calls[0].request
+    assert request.method == "POST"
+    assert request.params == {
+        "url": "https://youtu.be/x",
+        "lang": "en",
+        "dir_id": "5",
+        "detail": "detailed",
+        "question": "Who is speaking?",
+        # Not in SUPPORTED_LANGUAGES; the server validates answer_lang.
+        "answer_lang": "ga",
+    }
+
+
+@responses.activate
+def test_create_digest_omits_defaults(client):
+    responses.add(responses.POST, f"{BASE}/digest", json={"id": "me1", "digest_id": "dg1"})
+    client.create_digest("https://youtu.be/x")
+    assert responses.calls[0].request.params == {"url": "https://youtu.be/x"}
+
+
+@responses.activate
+def test_create_digest_rejects_bad_lang_and_detail(client):
+    with pytest.raises(BadRequestError):
+        client.create_digest("https://youtu.be/x", lang="xx")
+    with pytest.raises(BadRequestError) as exc:
+        client.create_digest("https://youtu.be/x", detail="huge")
+    assert exc.value.details == ["brief", "detailed"]
+    assert len(responses.calls) == 0
+
+
+@responses.activate
+def test_create_digest_unsupported_answer_lang(client):
+    responses.add(
+        responses.POST,
+        f"{BASE}/digest",
+        json={"error": "This answer language is not supported.",
+              "supported_languages": ["en", "ga"]},
+        status=400,
+    )
+    with pytest.raises(BadRequestError) as exc:
+        client.create_digest("https://youtu.be/x", answer_lang="yue")
+    assert exc.value.details == ["en", "ga"]
+
+
+@responses.activate
+def test_create_digest_error_key_on_200_raises(client):
+    responses.add(
+        responses.POST, f"{BASE}/digest",
+        json={"error": "This URL isn't supported or may be private."}, status=200,
+    )
+    with pytest.raises(GastonAPIError):
+        client.create_digest("http://x")
+
+
+@responses.activate
+def test_get_digest_pending(client):
+    responses.add(
+        responses.GET,
+        f"{BASE}/digest",
+        json={
+            "id": "me1", "state": "uploaded", "digest_id": "dg1", "digest_state": "pending",
+            "detail": "brief", "question": None, "custom_email": None,
+            "transcription_progress": 40,
+        },
+    )
+    digest = client.get_digest("dg1")
+    assert digest.state == "uploaded"
+    assert digest.digest_state == "pending"
+    assert digest.detail == "brief"
+    assert digest.transcription_progress == 40
+    assert digest.summary is None
+    assert not digest.is_ready and not digest.is_failed and not digest.is_finished
+
+    request = responses.calls[0].request
+    assert request.method == "GET"
+    assert request.params == {"digest_id": "dg1"}
+    assert request.headers["token"] == "gapi-test"
+
+
+@responses.activate
+def test_get_digest_ready_without_answer(client):
+    responses.add(
+        responses.GET,
+        f"{BASE}/digest",
+        json={
+            "id": "me1", "state": "transcribed", "digest_id": "dg1", "digest_state": "ready",
+            "detail": "detailed", "question": None, "language": "en",
+            "summary": {
+                "text": "It is about bees [S1-S2].",
+                "citations": [{"marker": "[S1-S2]", "title": "Bees", "sentence_ids": [1, 2],
+                               "start": 0.5, "end": 7.25}],
+            },
+        },
+    )
+    digest = client.get_digest("dg1")
+    assert digest.is_ready and digest.is_finished and not digest.is_failed
+    assert digest.language == "en"
+    assert digest.summary.text == "It is about bees [S1-S2]."
+    assert digest.summary.error is None
+    (citation,) = digest.summary.citations
+    assert citation.marker == "[S1-S2]"
+    assert citation.title == "Bees"
+    assert citation.sentence_ids == [1, 2]
+    assert (citation.start, citation.end) == (0.5, 7.25)
+    assert digest.answer is None
+    assert digest.raw["digest_state"] == "ready"
+
+
+@responses.activate
+def test_get_digest_ready_with_answer(client):
+    responses.add(
+        responses.GET,
+        f"{BASE}/digest",
+        json={
+            "digest_id": "dg1", "digest_state": "ready", "question": "Who?", "language": "en",
+            "summary": {"text": "Summary.", "citations": []},
+            "answer": {
+                "text": "Alice [S3].",
+                "citations": [{"marker": "[S3]", "title": None, "sentence_ids": [3],
+                               "start": None, "end": None}],
+            },
+        },
+    )
+    digest = client.get_digest("dg1")
+    assert digest.question == "Who?"
+    assert digest.summary.citations == []
+    assert digest.answer.text == "Alice [S3]."
+    assert digest.answer.error is None
+    assert digest.answer.citations[0].sentence_ids == [3]
+    assert digest.answer.citations[0].start is None
+
+
+@responses.activate
+def test_get_digest_ready_with_failed_answer(client):
+    responses.add(
+        responses.GET,
+        f"{BASE}/digest",
+        json={
+            "digest_id": "dg1", "digest_state": "ready", "question": "Who?", "language": "en",
+            "summary": {"text": "Summary.", "citations": []},
+            "answer": {"text": None, "citations": [], "error": "model unavailable"},
+        },
+    )
+    digest = client.get_digest("dg1")
+    assert digest.is_ready and not digest.is_failed
+    assert digest.summary.text == "Summary."
+    assert digest.answer.text is None
+    assert digest.answer.error == "model unavailable"
+    assert digest.error is None
+
+
+@responses.activate
+def test_get_digest_error_on_200_returns_digest(client):
+    responses.add(
+        responses.GET,
+        f"{BASE}/digest",
+        json={"id": "me1", "state": "error", "digest_id": "dg1", "digest_state": "error",
+              "detail": "brief", "error": "media processing failed"},
+        status=200,
+    )
+    digest = client.get_digest("dg1")
+    assert digest.is_failed and digest.is_finished and not digest.is_ready
+    assert digest.error == "media processing failed"
+    assert digest.summary is None
+
+
+@responses.activate
+def test_get_digest_ai_disabled(client):
+    responses.add(
+        responses.GET, f"{BASE}/digest",
+        json={"error": "AI features are disabled for this account."}, status=403,
+    )
+    with pytest.raises(AuthenticationError):
+        client.get_digest("dg1")
+
+
+@responses.activate
+def test_get_digest_not_found(client):
+    responses.add(
+        responses.GET, f"{BASE}/digest", json={"error": "Digest 'dg1' not found."}, status=404
+    )
+    with pytest.raises(NotFoundError):
+        client.get_digest("dg1")
+
+
+@responses.activate
+def test_wait_for_digest_polls_until_finished(client):
+    for payload in (
+        {"digest_id": "dg1", "digest_state": "pending"},
+        {"digest_id": "dg1", "digest_state": "generating"},
+        {"digest_id": "dg1", "digest_state": "error", "error": "boom"},
+    ):
+        responses.add(responses.GET, f"{BASE}/digest", json=payload)
+    digest = client.wait_for_digest("dg1", timeout=5, interval=0)
+    assert digest.is_failed
+    assert digest.error == "boom"
+    assert len(responses.calls) == 3
+
+
+@responses.activate
+def test_wait_for_digest_times_out(client):
+    responses.add(
+        responses.GET, f"{BASE}/digest", json={"digest_id": "dg1", "digest_state": "generating"}
+    )
+    with pytest.raises(GastonError) as exc:
+        client.wait_for_digest("dg1", timeout=0.05, interval=0.03)
+    assert not isinstance(exc.value, GastonAPIError)
+    assert "generating" in str(exc.value)
 
 
 def test_requires_token(monkeypatch):

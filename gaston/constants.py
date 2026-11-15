@@ -38,6 +38,17 @@ TRANSLATION_LANGUAGES: tuple[str, ...] = tuple(TRANSLATION_OPTIONS.keys())
 #: paid plan.
 EXPORT_FORMATS: tuple[str, ...] = ("text", "text_timestamps", "csv", "srt", "audio")
 
+#: Possible values of ``Digest.digest_state``.
+DIGEST_STATE_PENDING = "pending"
+DIGEST_STATE_GENERATING = "generating"
+DIGEST_STATE_READY = "ready"
+DIGEST_STATE_ERROR = "error"
+
+#: Levels of detail accepted by :meth:`GastonClient.create_digest`.
+DIGEST_DETAIL_BRIEF = "brief"
+DIGEST_DETAIL_DETAILED = "detailed"
+DIGEST_DETAILS: tuple[str, ...] = (DIGEST_DETAIL_BRIEF, DIGEST_DETAIL_DETAILED)
+
 #: Possible values of ``Media.state``.
 MEDIA_STATE_PENDING = "pending"
 MEDIA_STATE_UPLOADED = "uploaded"
